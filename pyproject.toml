@@ -1,0 +1,12 @@
+[project]
+name = "ecnu-course-table-tool"
+version = "0.1.0"
+description = "从 ECNU 官方课表 HTML 生成 ICS 与 iOS 导入二维码"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4==4.15.0",
+    "icalendar==7.3.0",
+    "pillow==12.3.0",
+    "pytz==2026.3.post1",
+    "qrcode==8.2",
+]
