@@ -1,0 +1,5 @@
+beautifulsoup4==4.15.0
+pytz==2026.3.post1
+icalendar==7.3.0
+qrcode==8.2
+pillow==12.3.0
