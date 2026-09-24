@@ -5,9 +5,12 @@ import argparse
 import functools
 import hashlib
 import http.server
+import ipaddress
+import json
+import platform
 import re
 import shutil
-import socket
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -308,17 +311,70 @@ def write_summary(
 
 
 def detect_lan_ip() -> str:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    """Find an address on a local network adapter, ignoring VPN/TUN routes."""
+    system = platform.system()
+    candidates: list[tuple[int, str]] = []
+
     try:
-        sock.connect(("8.8.8.8", 80))
-        return sock.getsockname()[0]
-    except OSError:
+        if system == "Darwin":
+            # networksetup lists hardware ports, so utun and other VPN devices are absent.
+            output = subprocess.run(
+                ["networksetup", "-listallhardwareports"],
+                check=True, capture_output=True, text=True,
+            ).stdout
+            for block in output.split("\n\n"):
+                port = re.search(r"^Hardware Port: (.+)$", block, re.MULTILINE)
+                device = re.search(r"^Device: (.+)$", block, re.MULTILINE)
+                if not port or not device:
+                    continue
+                name = port.group(1).lower()
+                if "bridge" in name:
+                    continue
+                result = subprocess.run(
+                    ["ipconfig", "getifaddr", device.group(1)],
+                    check=False, capture_output=True, text=True,
+                )
+                if result.returncode == 0:
+                    priority = 0 if "wi-fi" in name else 1 if "ethernet" in name else 2
+                    candidates.append((priority, result.stdout.strip()))
+        elif system == "Linux":
+            output = subprocess.run(
+                ["ip", "-j", "-4", "addr", "show", "up"],
+                check=True, capture_output=True, text=True,
+            ).stdout
+            for adapter in json.loads(output):
+                name = adapter.get("ifname", "")
+                if name.startswith(("lo", "tun", "tap", "wg", "docker", "br-", "veth", "tailscale", "zt")):
+                    continue
+                if adapter.get("link_type") != "ether":
+                    continue
+                priority = 0 if (Path("/sys/class/net") / name / "device").exists() else 1
+                for address in adapter.get("addr_info", []):
+                    if address.get("family") == "inet" and address.get("scope") == "global":
+                        candidates.append((priority, address["local"]))
+        elif system == "Windows":
+            script = (
+                "Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | "
+                "ForEach-Object { Get-NetIPAddress -InterfaceIndex $_.ifIndex "
+                "-AddressFamily IPv4 -ErrorAction SilentlyContinue } | "
+                "Select-Object -ExpandProperty IPAddress"
+            )
+            output = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", script],
+                check=True, capture_output=True, text=True,
+            ).stdout
+            candidates.extend((0, line.strip()) for line in output.splitlines())
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as exc:
+        raise RuntimeError("无法自动检测局域网 IP，请使用 --host 手动指定") from exc
+
+    for _, value in sorted(candidates):
         try:
-            return socket.gethostbyname(socket.gethostname())
-        except OSError as exc:
-            raise RuntimeError("无法自动检测局域网 IP，请使用 --host 手动指定") from exc
-    finally:
-        sock.close()
+            address = ipaddress.IPv4Address(value)
+        except ipaddress.AddressValueError:
+            continue
+        if not (address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified):
+            return value
+    raise RuntimeError("无法自动检测局域网 IP，请使用 --host 手动指定")
 
 
 class CalendarHandler(http.server.SimpleHTTPRequestHandler):

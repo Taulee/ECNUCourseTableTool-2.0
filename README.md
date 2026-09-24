@@ -92,6 +92,7 @@ pillow==12.3.0
 - `result/ECNU_学年_学期_Course_Schedule_iOS_QR.png`：iPhone 扫码入口。
 
 使用 iPhone 扫码时，让手机和电脑连接同一局域网。程序显示二维码和下载地址后会保持运行；导入完成后按 `Ctrl+C` 退出。
+自动检测会从电脑的物理网卡选取地址，避免 Clash TUN 等虚拟网卡的 IP 进入二维码；如果电脑连接了多个局域网，可用 `--host` 指定手机能访问的 IPv4 地址。
 
 只生成 ICS 和摘要，不启动扫码服务：
 
